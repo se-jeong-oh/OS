@@ -218,6 +218,8 @@ load (const char *file_name, void (**eip) (void), void **esp)
   char parse_filename[10][100]; // parsed file name
   int parse_num = 0; // number of arguments that parsed
   char *parse_ptr;
+  char *save_ptr;
+  char cp_fn[100];
   /* Allocate and activate page directory. */
   t->pagedir = pagedir_create ();
   if (t->pagedir == NULL) 
@@ -225,13 +227,13 @@ load (const char *file_name, void (**eip) (void), void **esp)
   process_activate ();
 
   /* Parsing Arguments */
-  parse_ptr = strtok(file_name, " ");
+  strlcpy(cp_fn, file_name, PGSIZE);
+  parse_ptr = strtok_r(cp_fn, " ", &save_ptr);
   while(parse_ptr != NULL) {
-    strcpy(parse_filename[parse_num], ptr);
-    parse_ptr = strtok(NULL, " ");
+    strlcpy(parse_filename[parse_num], parse_ptr, PGSIZE);
+    parse_ptr = strtok_r(NULL, " ", &save_ptr);
     parse_num++;
   }
-
 
   /* Open executable file. */
   file = filesys_open (file_name);
@@ -316,6 +318,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   /* Set up stack. */
   if (!setup_stack (esp))
     goto done;
+
 
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
