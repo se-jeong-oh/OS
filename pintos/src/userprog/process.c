@@ -215,11 +215,23 @@ load (const char *file_name, void (**eip) (void), void **esp)
   bool success = false;
   int i;
 
+  char parse_filename[10][100]; // parsed file name
+  int parse_num = 0; // number of arguments that parsed
+  char *parse_ptr;
   /* Allocate and activate page directory. */
   t->pagedir = pagedir_create ();
   if (t->pagedir == NULL) 
     goto done;
   process_activate ();
+
+  /* Parsing Arguments */
+  parse_ptr = strtok(file_name, " ");
+  while(parse_ptr != NULL) {
+    strcpy(parse_filename[parse_num], ptr);
+    parse_ptr = strtok(NULL, " ");
+    parse_num++;
+  }
+
 
   /* Open executable file. */
   file = filesys_open (file_name);
