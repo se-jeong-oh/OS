@@ -60,7 +60,6 @@ start_process (void *file_name_)
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (file_name, &if_.eip, &if_.esp);
-
   /* If load failed, quit. */
   palloc_free_page (file_name);
   if (!success) 
@@ -88,6 +87,7 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
+  while(1) {}
   return -1;
 }
 
@@ -215,32 +215,59 @@ load (const char *file_name, void (**eip) (void), void **esp)
   bool success = false;
   int i;
 
-  char parse_filename[10][100]; // parsed file name
+  char **parse_filename; // parsed file name
+  char **arg_addr;
   int parse_num = 0; // number of arguments that parsed
   char *parse_ptr;
+  //char *tmp_ptr;
+  //char *tmp_save;
   char *save_ptr;
-  char cp_fn[100];
+  char *cp_fn;
+  int data_len = 0;
+  int idx = 0;
+  int word_align;
   /* Allocate and activate page directory. */
   t->pagedir = pagedir_create ();
   if (t->pagedir == NULL) 
     goto done;
   process_activate ();
 
-  /* Parsing Arguments */
-  strlcpy(cp_fn, file_name, PGSIZE);
-  parse_ptr = strtok_r(cp_fn, " ", &save_ptr);
-  while(parse_ptr != NULL) {
-    strlcpy(parse_filename[parse_num], parse_ptr, PGSIZE);
-    parse_ptr = strtok_r(NULL, " ", &save_ptr);
+  /* Parsing Arguments
+  strlcpy(cp_fn, file_name, strlen(file_name)+1);
+  tmp_ptr = strtok_r(cp_fn, " ", &tmp_save);
+
+  while(tmp_ptr != NULL) {
+    tmp_ptr = strtok_r(NULL, " ", &tmp_save);
     parse_num++;
   }
+  */
 
+  // allocation of parse_filename
+  //parse_filename = (char **)malloc(sizeof(char *) * parse_num);
+  //arg_addr = (char **)malloc(sizeof(char *) * parse_num);
+  cp_fn = (char *)malloc(sizeof(char)*20);
+  parse_filename = (char **)malloc(sizeof(char *)*10);
+  arg_addr = (char **)malloc(sizeof(char *)*10);
+  if(cp_fn == NULL)
+    goto done;
+  strlcpy(cp_fn, file_name, strlen(file_name)+1);
+  parse_ptr = strtok_r(cp_fn, " ", &save_ptr);
+  while(parse_ptr != NULL) {
+    //parse_filename[idx] = (char *)malloc(sizeof(char)*(strlen(parse_ptr)+1));
+    strlcpy(parse_filename[parse_num], parse_ptr, strlen(parse_ptr) + 1);
+    parse_ptr = strtok_r(NULL, " ", &save_ptr);
+    //printf("%d. %s\n", idx, parse_filename[idx]);
+    parse_num++;
+  }
+  //strlcpy(file_name, parse_filename[0], strlen(parse_filename[0])+1);
   /* Open executable file. */
-  file = filesys_open (file_name);
+
+  file = filesys_open (parse_filename[0]);
+
   if (file == NULL) 
     {
-      printf ("load: %s: open failed\n", file_name);
-      goto done; 
+      printf ("load: %s: open failed\n", parse_filename[0]);
+      goto done;
     }
 
   /* Read and verify executable header. */
@@ -319,7 +346,37 @@ load (const char *file_name, void (**eip) (void), void **esp)
   if (!setup_stack (esp))
     goto done;
 
-
+  /* Construct Stack */
+  for (idx = parse_num-1; idx >= 0; idx--) {
+    // change address for length of argv string
+    *esp -= strlen(parse_filename[idx]) + 1;
+    // after function, esp pointer must back up
+    data_len += strlen(parse_filename[idx]) + 1;
+    strlcpy(*esp, parse_filename[idx], strlen(parse_filename[idx])+1);
+    arg_addr[idx] = *esp;
+  }
+  word_align = (4 - data_len % 4) % 4; // word aligning
+  *esp -= word_align;
+  *esp -= 4; // NULL insert
+  **(uint32_t **) esp = 0; // argv[4] address (as 0)
+  // push address in stack
+  for (idx = parse_num-1;idx >= 0; idx--) {
+    *esp -= 4;
+    **(uint32_t **) esp = arg_addr[idx];
+  }
+  // argv address, argc value insert
+  *esp -= 4;
+  **(uint32_t **) esp = *esp + 4;
+  *esp -= 4;
+  **(uint32_t **) esp = parse_num;
+  // return address
+  *esp -= 4;
+  ** (uint32_t **) esp = 0;
+  /* DEBUG */
+  hex_dump(*esp,*esp,100,1);
+  // free memory
+  //free(parse_filename);
+  //free(arg_addr);
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
 

@@ -2,20 +2,9 @@
 #include <string.h>
 
 int main() {
-    char txt[100] = "aaa bbb ccc";
-    char parsed[3][100];
-    char *ptr;
-    int idx = 0;
+    while(1) {
 
-    ptr = strtok(txt, " ");
-    while(ptr != NULL) {
-        //printf("%s\n", ptr);
-        strcpy(parsed[idx], ptr);
-        ptr = strtok(NULL, " ");
-        idx++;
     }
-    for (int i = 0; i< idx; i++) {
-        printf("%s\n", parsed[i]);
-    }
+    printf("fail\n");
     return 0;
 }
