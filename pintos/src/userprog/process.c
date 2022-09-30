@@ -1,3 +1,4 @@
+#include "threads/malloc.h"
 #include "userprog/process.h"
 #include <debug.h>
 #include <inttypes.h>
@@ -29,8 +30,12 @@ tid_t
 process_execute (const char *file_name) 
 {
   char *fn_copy;
+  //char real_file_name[256];
+  //struct list_elem* e;
+  //struct thread *t;
+  //char *parse_ptr = (char *)malloc(sizeof(char)*100);
+  //char *save_ptr;
   tid_t tid;
-
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   fn_copy = palloc_get_page (0);
@@ -38,10 +43,14 @@ process_execute (const char *file_name)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
+  //parse_ptr = strtok_r(file_name, " ", &save_ptr);
+  //strlcpy(real_file_name, parse_ptr, strlen(parse_ptr)+1);
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
-  if (tid == TID_ERROR)
+  if (tid == TID_ERROR) {
     palloc_free_page (fn_copy); 
+  }
+  //free(parse_ptr);
   return tid;
 }
 
@@ -64,7 +73,6 @@ start_process (void *file_name_)
   palloc_free_page (file_name);
   if (!success) 
     thread_exit ();
-
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its
@@ -85,12 +93,22 @@ start_process (void *file_name_)
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
 int
-process_wait (tid_t child_tid UNUSED) 
+process_wait (tid_t child_tid) 
 {
-  //while(1) {}
-  struct thread *curr = thread_current();
-  
-  return -1;
+  struct list_elem* elem;
+  struct thread* t = NULL;
+  int exit_status = -1;
+  for (elem = list_begin(&(thread_current()->child)); elem != list_end(&(thread_current()->child)); elem = list_next(elem)) {
+    t = list_entry(elem, struct thread, child_elem);
+    if (child_tid == t->tid) {
+      sema_down(&(t->child_lock));
+      exit_status = t->exit_status;
+      list_remove(&(t->child_elem));
+      sema_up(&(t->mem_lock));
+      return exit_status;
+    }
+  }
+  return exit_status;
 }
 
 /* Free the current process's resources. */
@@ -116,6 +134,8 @@ process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
+  sema_up(&(cur->child_lock));
+  sema_down(&(cur->mem_lock));
 }
 
 /* Sets up the CPU for running user code in the current
@@ -229,7 +249,13 @@ load (const char *file_name, void (**eip) (void), void **esp)
   int idx = 0;
   int word_align;
   /* Allocate and activate page directory. */
+  cp_fn = (char *)malloc(sizeof(char)*(strlen(file_name)+2));
+  parse_filename = (char **)malloc(sizeof(char *)*1000);
+  arg_addr = (char **)malloc(sizeof(char *)*1000);
+  if(cp_fn == NULL)
+    goto done;
   t->pagedir = pagedir_create ();
+
   if (t->pagedir == NULL) 
     goto done;
   process_activate ();
@@ -247,15 +273,13 @@ load (const char *file_name, void (**eip) (void), void **esp)
   // allocation of parse_filename
   //parse_filename = (char **)malloc(sizeof(char *) * parse_num);
   //arg_addr = (char **)malloc(sizeof(char *) * parse_num);
-  cp_fn = (char *)malloc(sizeof(char)*20);
-  parse_filename = (char **)malloc(sizeof(char *)*10);
-  arg_addr = (char **)malloc(sizeof(char *)*10);
-  if(cp_fn == NULL)
-    goto done;
+
+
   strlcpy(cp_fn, file_name, strlen(file_name)+1);
   parse_ptr = strtok_r(cp_fn, " ", &save_ptr);
   while(parse_ptr != NULL) {
-    //parse_filename[idx] = (char *)malloc(sizeof(char)*(strlen(parse_ptr)+1));
+    //printf("args : %s\n", parse_ptr);
+    parse_filename[parse_num] = (char *)malloc(sizeof(char)*(strlen(parse_ptr)+1));
     strlcpy(parse_filename[parse_num], parse_ptr, strlen(parse_ptr) + 1);
     parse_ptr = strtok_r(NULL, " ", &save_ptr);
     //printf("%d. %s\n", idx, parse_filename[idx]);
@@ -263,7 +287,6 @@ load (const char *file_name, void (**eip) (void), void **esp)
   }
   //strlcpy(file_name, parse_filename[0], strlen(parse_filename[0])+1);
   /* Open executable file. */
-
   file = filesys_open (parse_filename[0]);
 
   if (file == NULL) 
@@ -347,38 +370,45 @@ load (const char *file_name, void (**eip) (void), void **esp)
   /* Set up stack. */
   if (!setup_stack (esp))
     goto done;
-
   /* Construct Stack */
+  //printf("parse_num : %d\n", parse_num);
   for (idx = parse_num-1; idx >= 0; idx--) {
-    // change address for length of argv string
-    *esp -= strlen(parse_filename[idx]) + 1;
-    // after function, esp pointer must back up
-    data_len += strlen(parse_filename[idx]) + 1;
+    *esp -= (strlen(parse_filename[idx]) + 1);
+    data_len += (strlen(parse_filename[idx]) + 1);
     strlcpy(*esp, parse_filename[idx], strlen(parse_filename[idx])+1);
+    
     arg_addr[idx] = *esp;
+    //printf("addr : %x\n", arg_addr[idx]);
   }
-  word_align = (4 - data_len % 4) % 4; // word aligning
-  *esp -= word_align;
+  word_align = 4 - data_len % 4; // word aligning
+  
+  for (i=0;i<word_align;i++) {
+    *esp -= 1;
+    **(uint8_t **) esp = 0;
+  }
+  //*esp -= word_align;
   *esp -= 4; // NULL insert
   **(uint32_t **) esp = 0; // argv[4] address (as 0)
   // push address in stack
   for (idx = parse_num-1;idx >= 0; idx--) {
     *esp -= 4;
-    **(uint32_t **) esp = arg_addr[idx];
+    **(uint32_t **) esp = (uint32_t)arg_addr[idx];
+    //printf("stack addr of %s : %x\n", parse_filename[idx], **(uint32_t **)esp);
   }
   // argv address, argc value insert
   *esp -= 4;
-  **(uint32_t **) esp = *esp + 4;
+  **(uint32_t **) esp = (uint32_t)(*esp + 4);
   *esp -= 4;
-  **(uint32_t **) esp = parse_num;
+   **(uint32_t **) esp = parse_num;
   // return address
   *esp -= 4;
-  ** (uint32_t **) esp = 0;
+  **(uint32_t **) esp = 0;
   /* DEBUG */
-  hex_dump(*esp,*esp,100,1);
+  //hex_dump(*esp,*esp,100,1);
   // free memory
   //free(parse_filename);
   //free(arg_addr);
+  //free(cp_fn);
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
 
@@ -387,6 +417,10 @@ load (const char *file_name, void (**eip) (void), void **esp)
  done:
   /* We arrive here whether the load is successful or not. */
   file_close (file);
+  free(cp_fn);
+  free(arg_addr);
+  for (i=0;i<parse_num;i++) free(parse_filename[i]);  
+  free(parse_filename);
   return success;
 }
 

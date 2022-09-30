@@ -1,6 +1,7 @@
 #ifndef THREADS_THREAD_H
 #define THREADS_THREAD_H
 
+#include "threads/synch.h"
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
@@ -96,7 +97,12 @@ struct thread
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
-    uint32_t *pagedir;                  /* Page directory. */
+      uint32_t *pagedir;                  /* Page directory. */
+      struct semaphore child_lock;
+      struct semaphore mem_lock;
+      struct list child;
+      struct list_elem child_elem;
+      int exit_status;
 #endif
 
     /* Owned by thread.c. */
