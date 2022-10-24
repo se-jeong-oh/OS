@@ -100,8 +100,12 @@ struct thread
       uint32_t *pagedir;                  /* Page directory. */
       struct semaphore child_lock;
       struct semaphore mem_lock;
+      struct semaphore execution; // exe_child
       struct list child;
       struct list_elem child_elem;
+      struct file* fd[128];
+      struct thread* parent;
+      int flag;
       int exit_status;
 #endif
 

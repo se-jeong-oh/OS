@@ -18,6 +18,7 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "userprog/syscall.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
@@ -31,11 +32,12 @@ process_execute (const char *file_name)
 {
   char *fn_copy;
   //char real_file_name[256];
-  //struct list_elem* e;
-  //struct thread *t;
+  struct list_elem* elem;
+  struct thread *curr_th;
   //char *parse_ptr = (char *)malloc(sizeof(char)*100);
   //char *save_ptr;
   tid_t tid;
+
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   fn_copy = palloc_get_page (0);
@@ -47,10 +49,17 @@ process_execute (const char *file_name)
   //strlcpy(real_file_name, parse_ptr, strlen(parse_ptr)+1);
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  sema_down(&thread_current()->execution);
   if (tid == TID_ERROR) {
     palloc_free_page (fn_copy); 
   }
+  for (elem = list_begin(&(thread_current()->child)); elem != list_end(&(thread_current()->child)); elem = list_next(elem)) {
+    curr_th = list_entry(elem, struct thread, child_elem);
+    if(curr_th->flag == 1)
+      process_wait(tid);
+  }  
   //free(parse_ptr);
+  //sema_up(&thread_current()->execution);
   return tid;
 }
 
@@ -69,10 +78,14 @@ start_process (void *file_name_)
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (file_name, &if_.eip, &if_.esp);
+  sema_up(&thread_current()->parent->execution);
   /* If load failed, quit. */
   palloc_free_page (file_name);
-  if (!success) 
+  if (!success) {
+    thread_current()->flag = 1;
     thread_exit ();
+    //exit(-1);
+  }
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its
