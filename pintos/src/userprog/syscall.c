@@ -150,8 +150,8 @@ int open (const char *file) {
   char *parse_ptr;
   char *save_ptr;
   char cp_fn[16];
-  strlcpy(cp_fn, t->name, strlen(t->name));
-  parse_ptr = strtok_r(cp_fn, " ", &save_ptr);
+  //strlcpy(cp_fn, t->name, strlen(t->name));
+  //parse_ptr = strtok_r(cp_fn, " ", &save_ptr);
   if (file_open == NULL) {
     lock_release(&lock_file);
     return -1;
@@ -187,6 +187,7 @@ unsigned tell (int fd) {
   return (unsigned)file_tell(t->fd[fd]);
 }
 void close (int fd) {
+  //isvalid_fd(fd);
   struct thread *t = thread_current();
   if(t->fd[fd] == NULL) exit(-1);
   t->fd[fd] = NULL;
@@ -194,6 +195,7 @@ void close (int fd) {
 }
 
 int read (int fd, void *buffer, unsigned length) {
+  //isvalid_fd(fd);
   int i = -1;
   struct thread *curr = thread_current();
   address_protect(buffer);
@@ -217,6 +219,7 @@ int read (int fd, void *buffer, unsigned length) {
   return i;
 }
 int write (int fd, const void *buffer, unsigned length) {
+  //isvalid_fd(fd);
   address_protect(buffer);
   lock_acquire(&lock_file);
   int len = -1;
