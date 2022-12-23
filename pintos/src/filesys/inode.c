@@ -9,15 +9,33 @@
 
 /* Identifies an inode. */
 #define INODE_MAGIC 0x494e4f44
+#define DIRECT_BLOCKS_NUM 124
+#define INDIRECT_BLOCKS_NUM 128 /* 512 / 4 */
 
+enum direct_t {
+  NORMAL_DIRECT = 0,
+  INDIRECT,
+  DOUBLE_INDIRECT,
+  OUT_LIMIT
+};
+
+struct sector_location {
+  direct_t directness;
+  off_t index1;
+  off_t index2;
+}
 /* On-disk inode.
    Must be exactly BLOCK_SECTOR_SIZE bytes long. */
 struct inode_disk
   {
-    block_sector_t start;               /* First data sector. */
-    off_t length;                       /* File size in bytes. */
-    unsigned magic;                     /* Magic number. */
-    uint32_t unused[125];               /* Not used. */
+    //bool is_dir;                        /* Check if this is directory -> 1 bytes*/
+    //block_sector_t start;               /* First data sector. -> 4 bytes*/
+    block_sector_t double_indirect_block;              /* Double Indirect Block, 4 bytes*/
+    block_sector_t single_indirect_block;              /* Single Indirect Block, 4 bytes*/
+    block_sector_t direct_block[DIRECT_BLOCKS_NUM]    /* Direct block 4 * 124 = 496 bytes*/
+    off_t length;                                      /* File size in bytes. -> 4 bytes*/
+    unsigned magic;                                    /* Magic number. -> 4 bytes*/
+    //uint8_t unused[499];                               /* 512 -  = 499 => 499 * 1byte Not used. */
   };
 
 /* Returns the number of sectors to allocate for an inode SIZE
@@ -36,6 +54,7 @@ struct inode
     int open_cnt;                       /* Number of openers. */
     bool removed;                       /* True if deleted, false otherwise. */
     int deny_write_cnt;                 /* 0: writes ok, >0: deny writes. */
+    //direct_t method;                    /*  */
     struct inode_disk data;             /* Inode content. */
   };
 
@@ -47,8 +66,15 @@ static block_sector_t
 byte_to_sector (const struct inode *inode, off_t pos) 
 {
   ASSERT (inode != NULL);
-  if (pos < inode->data.length)
-    return inode->data.start + pos / BLOCK_SECTOR_SIZE;
+  //block_sector_t target; // return 할 sector의 index
+
+  if (pos < inode->data.length) {
+    // pos는 여기서 읽고자 하는 데이터의 position (bytes 단위, block은 512 bytes)
+    // return type은 block_sector_t
+    //return inode->data.start + pos / BLOCK_SECTOR_SIZE;
+    /* 먼저 direct blocks에 할당되는 position인지 확인 */
+    return pos / BLOCK_SECTOR_SIZE;
+  }
   else
     return -1;
 }
@@ -258,6 +284,12 @@ off_t
 inode_write_at (struct inode *inode, const void *buffer_, off_t size,
                 off_t offset) 
 {
+  /*
+  - inode -> inode 구조체. 
+  - buffer -> buffer에 써야 할 data가 들어가 있음.
+  - size -> 해당 buffer에서 size 몇 만큼 쓸지
+  - offset -> offset에서 쓰기 시작, 해당 inode 기준의 offset
+  */
   const uint8_t *buffer = buffer_;
   off_t bytes_written = 0;
   uint8_t *bounce = NULL;
@@ -268,9 +300,33 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
   while (size > 0) 
     {
       /* Sector to write, starting byte offset within sector. */
+      // 해당 inode를 통해 해당 offset이 몇 번째 sector인지 확인
       block_sector_t sector_idx = byte_to_sector (inode, offset);
+      // 0 ~ DIRECT_BLOCKS_NUM-1 까지는 Direct Block
+      // DIRECT_BLOCKS_NUM ~ DIRECT_BLOCKS_NUM + INDIRECT_BLOCKS_NUM - 1 까지는 single indirect block
+      /* sector_ofs는 해당 sector에서 몇번째 offset부터 쓰기 시작할건지 */
       int sector_ofs = offset % BLOCK_SECTOR_SIZE;
 
+      // direct로 접근 가능한 sector는 DIRECT_BLOCKS_NUM, 곧 124개이므로, 123번까지이다.
+      // 따라서, sector는 single indirect block으로 접근하게 되며, 총 128개의 data block이 존재한다. (인덱스 0 ~ 127)
+      // double indirect block으로 접근하게 되면, 총 128 * 128 개의 data block이 존재한다. (인덱스 0 ~ 128^2 - 1)
+      // 따라서 sector idx가 124이면, single indirect block 접근 인덱스는 0이다.
+      // 또한 sector idx가 124 + 128 = 252 라면, double indirect block 접근 인덱스가 0이다.
+
+      // direct 접근인지 single indirect OR double indirect 접근인지 확인
+      if (sector_idx >= DIRECT_BLOCKS_NUM) {
+        // single indirect 접근인지 double indirect 접근인지 확인
+        if (sector_idx >= DIRECT_BLOCKS_NUM + INDIRECT_BLOCKS_NUM) {
+          // double indirect 접근이라면
+        }
+        else {
+          // single indirect 접근이라면
+          sector_idx -= DIRECT_BLOCKS_NUM;
+        }
+      }
+      else {
+        // direct 접근이라면 
+      }
       /* Bytes left in inode, bytes left in sector, lesser of the two. */
       off_t inode_left = inode_length (inode) - offset;
       int sector_left = BLOCK_SECTOR_SIZE - sector_ofs;
